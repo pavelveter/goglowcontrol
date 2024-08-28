@@ -1,0 +1,9 @@
+@kitchen: 192.168.88.57-59
+@bathroom: 192.168.88.55
+@monitor: 192.168.88.51
+@stand: 192.168.88.52
+@tv_right: 192.168.88.53
+@tv_left: 192.168.88.54
+@tv: @tv_left @tv_right
+@room: @tv @monitor @stand
+@all: @room @kitchen @bathroom

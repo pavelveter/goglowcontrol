@@ -1,0 +1,5 @@
+evening: @tv red, @stand 4300, @monitor off
+lr: @tv_left red, @tv_right fuchsia, @monitor 4300, @monitor brightness 15, @stand 4300
+work: @monitor green, @stand blue, @tv_left blue, @tv_right green
+movie: @tv red, @monitor green, @stand blue, @kitchen off
+red: @room red
