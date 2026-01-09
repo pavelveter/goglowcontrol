@@ -152,7 +152,7 @@ Contains a list of predefined scenes. Each line has the format:
 scene_name: bulb_alias1 action1, bulb_alias2 action2, ..., bulb_aliasN actionN
 ```
 
-These files should be located in the same directory as the GlowControl executable or in the current working directory.
+These files live under the `cfg/` directory alongside the project (or next to the compiled binary). The loader also falls back to the current working directory for compatibility.
 
 ## **Contributing**
 

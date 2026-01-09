@@ -58,7 +58,7 @@ func initConfig() {
 	scenes = loadScenesFromDirs("scenes.txt", execDir, currentDir, parentDir, grandParentDir)
 }
 
-// readFileFromDirs reads a file from specified directories
+// readFileFromDirs reads a file from specified directories (preferring cfg subdir)
 //
 // Parameters:
 //   - filename: name of the file to read
@@ -69,10 +69,14 @@ func initConfig() {
 //   - error: error during file reading
 func readFileFromDirs(filename string, dirs ...string) (string, error) {
 	for _, dir := range dirs {
-		path := filepath.Join(dir, filename)
-		data, err := os.ReadFile(path)
-		if err == nil {
-			return strings.TrimSpace(string(data)), nil
+		for _, path := range []string{
+			filepath.Join(dir, "cfg", filename),
+			filepath.Join(dir, filename),
+		} {
+			data, err := os.ReadFile(path)
+			if err == nil {
+				return strings.TrimSpace(string(data)), nil
+			}
 		}
 	}
 	return "", fmt.Errorf("file %s not found", filename)
@@ -88,10 +92,14 @@ func readFileFromDirs(filename string, dirs ...string) (string, error) {
 //   - map[string]Scene: map of scenes
 func loadScenesFromDirs(filename string, dirs ...string) map[string]Scene {
 	for _, dir := range dirs {
-		path := filepath.Join(dir, filename)
-		content, err := os.ReadFile(path)
-		if err == nil {
-			return parseScenes(string(content))
+		for _, path := range []string{
+			filepath.Join(dir, "cfg", filename),
+			filepath.Join(dir, filename),
+		} {
+			content, err := os.ReadFile(path)
+			if err == nil {
+				return parseScenes(string(content))
+			}
 		}
 	}
 	log.Printf("Scenes file %s not found, using empty scenes map", filename)
