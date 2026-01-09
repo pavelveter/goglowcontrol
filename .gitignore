@@ -1,0 +1,22 @@
+.DS_Store
+
+# Build artifacts
+light
+*.exe
+*.dll
+*.so
+
+# Go cache and test outputs
+.gocache/
+coverage.out
+coverage.html
+*.coverprofile
+*.test
+
+# Vendor / binaries
+vendor/
+bin/
+
+# Editors/IDE
+.vscode/
+.idea/
