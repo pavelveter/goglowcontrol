@@ -4,11 +4,14 @@ import (
 	"strings"
 )
 
+// cleanStatus squeezes multiline/status text into a single line.
+// cleanStatus squeezes multiline/status text into a single line.
 func cleanStatus(text string) string {
 	parts := strings.Fields(text)
 	return strings.Join(parts, " ")
 }
 
+// max returns the larger of two ints.
 func max(a, b int) int {
 	if a > b {
 		return a
@@ -16,6 +19,7 @@ func max(a, b int) int {
 	return b
 }
 
+// computeUsableWidth normalizes the drawing width for panels.
 func computeUsableWidth(totalWidth int) int {
 	if totalWidth == 0 {
 		totalWidth = 96
@@ -27,6 +31,7 @@ func computeUsableWidth(totalWidth int) int {
 	return usableWidth
 }
 
+// computeSubmenuWidths splits available width between three panels.
 func computeSubmenuWidths(usableWidth int) (int, int, int) {
 	third := usableWidth / 3
 	colWidth := third
@@ -56,6 +61,7 @@ func computeColorCols(width int) int {
 	return cols
 }
 
+// colorContentWidth returns available width for color text rendering.
 func (m model) colorContentWidth() int {
 	usable := computeUsableWidth(m.width)
 	colWidth, _, _ := computeSubmenuWidths(usable)
@@ -86,6 +92,7 @@ func buildRange(min, max, count int) []int {
 	return values
 }
 
+// clampIndex bounds an index to the available count.
 func clampIndex(val, count int) int {
 	if count <= 0 {
 		return 0
@@ -99,6 +106,7 @@ func clampIndex(val, count int) int {
 	return val
 }
 
+// moveGridIndex moves an index over a grid with clamping.
 func moveGridIndex(current, total, cols, dRow, dCol int) int {
 	if total == 0 || cols <= 0 {
 		return 0
@@ -161,6 +169,7 @@ func layoutWords(words []string, maxWidth int) []int {
 	return counts
 }
 
+// moveInLines moves an index across lines laid out by layoutWords.
 func moveInLines(current int, counts []int, dRow, dCol int) int {
 	if len(counts) == 0 {
 		return 0
@@ -183,6 +192,7 @@ func moveInLines(current int, counts []int, dRow, dCol int) int {
 	return indexFromLinePos(counts, line, pos)
 }
 
+// findLineAndPos converts a flat index into line and position.
 func findLineAndPos(counts []int, idx int) (int, int) {
 	remaining := idx
 	for line, count := range counts {
@@ -194,6 +204,7 @@ func findLineAndPos(counts []int, idx int) (int, int) {
 	return len(counts) - 1, counts[len(counts)-1] - 1
 }
 
+// indexFromLinePos converts line and position back to flat index.
 func indexFromLinePos(counts []int, line, pos int) int {
 	if line < 0 {
 		line = 0
@@ -215,6 +226,7 @@ func indexFromLinePos(counts []int, line, pos int) int {
 	return idx
 }
 
+// pickWordIndex chooses a word by horizontal offset within a line.
 func pickWordIndex(words []string, contentX int) int {
 	if len(words) == 0 {
 		return 0

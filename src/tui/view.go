@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// View renders the entire TUI frame depending on current mode.
 func (m model) View() string {
 	header := titleStyle.Render("Go GlowControl — Light TUI")
 	help := helpStyle.Render(mainHelpText)
@@ -65,6 +66,7 @@ func (m model) View() string {
 	)
 }
 
+// renderAliasBox renders the aliases panel with selection.
 func (m model) renderAliasBox(width int) string {
 	title := sectionStyle.Render("Aliases")
 	if m.listFocus == focusAliases {
@@ -74,6 +76,7 @@ func (m model) renderAliasBox(width int) string {
 	return boxStyle.Width(width).Render(title + "\n" + body)
 }
 
+// renderSceneBox renders the scenes panel with selection.
 func (m model) renderSceneBox(width int) string {
 	title := sectionStyle.Render("Scenes")
 	if m.listFocus == focusScenes {
@@ -83,6 +86,7 @@ func (m model) renderSceneBox(width int) string {
 	return boxStyle.Width(width).Render(title + "\n" + body)
 }
 
+// renderColorsPanel draws the colors panel in submenu.
 func (m model) renderColorsPanel(width int) string {
 	title := sectionStyle.Render("Colors")
 	if m.subFocus == subColors {
@@ -120,6 +124,7 @@ func (m model) renderColorsPanel(width int) string {
 	return boxStyle.Width(width).Render(title + "\n" + b.String())
 }
 
+// renderTempsPanel draws the temperature values vertically.
 func (m model) renderTempsPanel(width int) string {
 	title := sectionStyle.Render("Temperature")
 	if m.subFocus == subTemps {
@@ -141,6 +146,7 @@ func (m model) renderTempsPanel(width int) string {
 	return boxStyle.Width(width).Render(title + "\n" + b.String())
 }
 
+// renderBrightPanel draws the brightness values vertically.
 func (m model) renderBrightPanel(width int) string {
 	title := sectionStyle.Render("Brightness")
 	if m.subFocus == subBrightness {
@@ -162,6 +168,7 @@ func (m model) renderBrightPanel(width int) string {
 	return boxStyle.Width(width).Render(title + "\n" + b.String())
 }
 
+// renderListBody renders list items with optional selection highlighting.
 // renderListBody renders list items with optional selection highlighting.
 func renderListBody(items []string, selected int, active bool) string {
 	if len(items) == 0 {

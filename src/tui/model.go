@@ -70,6 +70,7 @@ type model struct {
 	logChan       <-chan string
 }
 
+// newModel builds the Bubble Tea model with initial data and listeners.
 func newModel(deps Deps, logCh <-chan string) model {
 	deps.defaults()
 
@@ -93,10 +94,12 @@ func newModel(deps Deps, logCh <-chan string) model {
 	return m
 }
 
+// Init starts background listeners.
 func (m model) Init() tea.Cmd {
 	return m.listenForLog()
 }
 
+// Update handles all incoming Bubble Tea messages (keys, mouse, resize, logs).
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -252,6 +255,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// toggleListFocus swaps focus between aliases and scenes.
 func (m *model) toggleListFocus() {
 	if m.listFocus == focusAliases {
 		m.listFocus = focusScenes
@@ -262,6 +266,7 @@ func (m *model) toggleListFocus() {
 	m.inSubmenu = false
 }
 
+// moveListSelection moves selection in the active list.
 func (m *model) moveListSelection(delta int) {
 	switch m.listFocus {
 	case focusAliases:
@@ -279,12 +284,14 @@ func (m *model) moveListSelection(delta int) {
 	}
 }
 
+// runCommand is a placeholder since TUI uses direct alias operations.
 func (m model) runCommand() tea.Cmd {
 	return func() tea.Msg {
 		return commandResultMsg{err: errors.New("no command inputs available in TUI")}
 	}
 }
 
+// enterSubmenu opens the color/temp/brightness submenu for the alias.
 func (m *model) enterSubmenu(alias string) {
 	m.inSubmenu = true
 	m.submenuAlias = alias
@@ -298,6 +305,7 @@ func (m *model) enterSubmenu(alias string) {
 	m.brightIndex = 0
 }
 
+// exitSubmenu closes the submenu and resets related state.
 func (m *model) exitSubmenu() {
 	m.inSubmenu = false
 	m.submenuAlias = ""
@@ -305,6 +313,7 @@ func (m *model) exitSubmenu() {
 	m.actionFocus = false
 }
 
+// realignSubmenuSelections bounds submenu indices on resize/data change.
 func (m *model) realignSubmenuSelections() {
 	if m.colorCols <= 0 {
 		m.colorCols = computeColorCols(m.width)
@@ -314,6 +323,7 @@ func (m *model) realignSubmenuSelections() {
 	m.brightIndex = clampIndex(m.brightIndex, m.deps.ValueSteps)
 }
 
+// moveSubmenuSelection updates selection inside the submenu panels.
 func (m *model) moveSubmenuSelection(deltaRow, deltaCol int) {
 	switch m.subFocus {
 	case subColors:
@@ -325,13 +335,14 @@ func (m *model) moveSubmenuSelection(deltaRow, deltaCol int) {
 		m.colorIndex = moveInLines(m.colorIndex, counts, deltaRow, deltaCol)
 	case subTemps:
 		count := m.deps.ValueSteps
-		m.tempIndex = clampIndex(m.tempIndex+deltaCol, count)
+		m.tempIndex = clampIndex(m.tempIndex+deltaRow+deltaCol, count)
 	case subBrightness:
 		count := m.deps.ValueSteps
-		m.brightIndex = clampIndex(m.brightIndex+deltaCol, count)
+		m.brightIndex = clampIndex(m.brightIndex+deltaRow+deltaCol, count)
 	}
 }
 
+// applySubmenuSelection executes the currently highlighted submenu option.
 func (m model) applySubmenuSelection() tea.Cmd {
 	if !m.inSubmenu || m.submenuAlias == "" {
 		return nil
@@ -361,6 +372,7 @@ func (m model) applySubmenuSelection() tea.Cmd {
 	return nil
 }
 
+// clickedQuit detects clicks on the "quit" word in the help line.
 func (m model) clickedQuit(x int) bool {
 	help := mainHelpText
 	if m.inSubmenu {
@@ -375,6 +387,7 @@ func (m model) clickedQuit(x int) bool {
 	return x >= runeStart && x < runeEnd
 }
 
+// handleMouse dispatches mouse clicks to the appropriate handler.
 func (m *model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	if m.inSubmenu {
 		return m.handleMouseSubmenu(msg)
@@ -382,6 +395,7 @@ func (m *model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	return m.handleMouseMain(msg)
 }
 
+// handleMouseMain reacts to clicks in the main two-panel view.
 func (m *model) handleMouseMain(msg tea.MouseMsg) tea.Cmd {
 	usableWidth := computeUsableWidth(m.width)
 	leftWidth := usableWidth / 2
@@ -457,6 +471,7 @@ func (m *model) handleMouseMain(msg tea.MouseMsg) tea.Cmd {
 	return nil
 }
 
+// handleMouseSubmenu reacts to clicks inside the submenu panels.
 func (m *model) handleMouseSubmenu(msg tea.MouseMsg) tea.Cmd {
 	usableWidth := computeUsableWidth(m.width)
 	colWidth, tempWidth, brightWidth := computeSubmenuWidths(usableWidth)
@@ -518,6 +533,7 @@ func (m *model) handleMouseSubmenu(msg tea.MouseMsg) tea.Cmd {
 	return nil
 }
 
+// runAliasAction sends an on/off style action to all IPs of an alias.
 func (m model) runAliasAction(alias, action string) tea.Cmd {
 	return func() tea.Msg {
 		if m.deps.ResolveTargets == nil || m.deps.Execute == nil {
@@ -545,6 +561,7 @@ func (m model) runAliasAction(alias, action string) tea.Cmd {
 	}
 }
 
+// runAliasCommand sends a command with parameter to all IPs of an alias.
 func (m model) runAliasCommand(alias, command, param string) tea.Cmd {
 	return func() tea.Msg {
 		if m.deps.ResolveTargets == nil || m.deps.Execute == nil {
@@ -572,6 +589,7 @@ func (m model) runAliasCommand(alias, command, param string) tea.Cmd {
 	}
 }
 
+// runScene triggers a scene callback.
 func (m model) runScene(sceneName string) tea.Cmd {
 	return func() tea.Msg {
 		if m.deps.RunScene == nil {
@@ -585,6 +603,7 @@ func (m model) runScene(sceneName string) tea.Cmd {
 	}
 }
 
+// listenForLog converts log channel messages into Bubble Tea messages.
 func (m model) listenForLog() tea.Cmd {
 	if m.logChan == nil {
 		return nil

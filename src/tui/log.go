@@ -2,14 +2,17 @@ package tui
 
 import "strings"
 
+// logLineMsg carries log lines into the Bubble Tea update loop.
 type logLineMsg struct {
 	line string
 }
 
+// logForwarder redirects log output into Bubble Tea messages.
 type logForwarder struct {
 	ch chan<- string
 }
 
+// Write implements io.Writer to forward logs into the program loop.
 func (w logForwarder) Write(p []byte) (int, error) {
 	text := strings.TrimSpace(string(p))
 	if text == "" {
