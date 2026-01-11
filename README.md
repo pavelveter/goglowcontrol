@@ -124,6 +124,12 @@ To run the application, run:
 just run
 ```
 
+To launch the interactive TUI (mouse/keyboard), run:
+
+```
+light tui
+```
+
 ## **Configuration Files**
 
 Go GlowControl uses several text files for configuration:

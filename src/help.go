@@ -121,6 +121,7 @@ func printHelp() {
 	fmt.Print(colorize("Usage: ", colorBold+colorCyan))
 	fmt.Printf("%s%s <ip|@alias|range> <command> [param]\n\n",
 		colorize(scriptName, colorBold), colorReset)
+	fmt.Printf("%s%s tui%s — interactive TUI (mouse/keys)\n\n", colorize("Alt: ", colorBold), colorize(scriptName, colorCyan), colorReset)
 
 	fmt.Println(colorize("Commands:", colorBold))
 	fmt.Printf("  %s: %s, %s, %s <c>, %s <1700..6500>, %s <1..100>, %s, %s, %s, %s, %s\n",
