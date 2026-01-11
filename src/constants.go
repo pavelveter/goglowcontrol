@@ -17,7 +17,7 @@ const (
 // Validation constants
 const (
 	// minBrightness minimum brightness value
-	minBrightness = 1
+	minBrightness = 5
 	// maxBrightness maximum brightness value
 	maxBrightness = 100
 	// minTemperature minimum temperature value

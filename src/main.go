@@ -19,6 +19,13 @@ func main() {
 		return
 	}
 
+	if os.Args[1] == "tui" {
+		if err := runTUI(); err != nil {
+			log.Fatalf("TUI failed: %v", err)
+		}
+		return
+	}
+
 	if os.Args[1] == "scene" && len(os.Args) == 3 {
 		executeScene(os.Args[2])
 		return
