@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,19 @@ func (m model) View() string {
 		totalWidth = 96
 	}
 	usableWidth := computeUsableWidth(totalWidth)
+
+	if m.selecting {
+		header = titleStyle.Render("Select aliases")
+		help = helpStyle.Render(selectHelpText)
+		selector := m.renderSelectorBox(usableWidth)
+		statusBox := boxStyle.Width(usableWidth).Render(sectionStyle.Render("Status") + "\n" + m.status)
+		return lipgloss.JoinVertical(lipgloss.Left,
+			header,
+			help,
+			selector,
+			statusBox,
+		)
+	}
 
 	if m.inSubmenu {
 		header = titleStyle.Render(m.submenuAlias)
@@ -82,7 +96,67 @@ func (m model) renderSceneBox(width int) string {
 	if m.listFocus == focusScenes {
 		title = focusedTitle.Render("Scenes")
 	}
-	body := renderListBody(m.scenes, m.sceneIndex, m.listFocus == focusScenes)
+	body := m.renderSceneBodyWithAdd(m.listFocus == focusScenes)
+	return boxStyle.Width(width).Render(title + "\n" + body)
+}
+
+// renderSceneBodyWithAdd shows scenes plus a trailing "+" item.
+func (m model) renderSceneBodyWithAdd(active bool) string {
+	total := m.sceneItemCount()
+	if total == 0 {
+		return "–"
+	}
+	var rows []string
+	for i, scene := range m.scenes {
+		if active && i == m.sceneIndex {
+			rows = append(rows, selectedStyle.Render("> "+scene))
+		} else {
+			rows = append(rows, "  "+scene)
+		}
+	}
+	addLabel := "+"
+	if active && m.sceneIndex == len(m.scenes) {
+		rows = append(rows, selectedStyle.Render("> "+addLabel))
+	} else {
+		rows = append(rows, "  "+addLabel)
+	}
+	return strings.Join(rows, "\n")
+}
+
+// renderSelectorBody renders alias list with check marks and state info.
+func (m model) renderSelectorBody(active bool) string {
+	if len(m.aliases) == 0 {
+		return "–"
+	}
+	var rows []string
+	for i, alias := range m.aliases {
+		check := " "
+		if m.selected[alias] {
+			check = checkStyle.Render("✓")
+		}
+		stateText := ""
+		if m.state != nil {
+			if summary, ok := m.state.Summary(alias); ok {
+				stateText = summary
+			}
+		}
+		content := alias
+		if stateText != "" {
+			content = fmt.Sprintf("%s  %s", alias, stateText)
+		}
+		if active && i == m.selectIndex {
+			rows = append(rows, "> "+check+" "+selectedStyle.Render(content))
+		} else {
+			rows = append(rows, "  "+check+" "+content)
+		}
+	}
+	return strings.Join(rows, "\n")
+}
+
+// renderSelectorBox renders alias selector view with states.
+func (m model) renderSelectorBox(width int) string {
+	title := focusedTitle.Render("Aliases")
+	body := m.renderSelectorBody(true)
 	return boxStyle.Width(width).Render(title + "\n" + body)
 }
 

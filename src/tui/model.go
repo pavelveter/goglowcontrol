@@ -40,9 +40,11 @@ var (
 	helpStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
 	selectedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Bold(true)
 	focusedTitle   = sectionStyle.Copy().Underline(true)
+	checkStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
 	aliasActions   = []string{"on", "off"}
 	mainHelpText   = "Tab switch lists • Up/Down move • Left/Right choose alias on/off • Enter/Space run selection • Ctrl+C/Esc/q quit"
 	subHelpText    = "Tab switch panels • Arrows move • Enter/Space apply • Backspace return • Ctrl+C/Esc/q quit"
+	selectHelpText = "Up/Down move • Enter/Space toggle ✓ • Backspace return • Ctrl+C/Esc/q quit"
 )
 
 // model holds UI state.
@@ -68,6 +70,9 @@ type model struct {
 	tempIndex     int
 	brightIndex   int
 	state         *State
+	selecting     bool
+	selectIndex   int
+	selected      map[string]bool
 	logChan       <-chan string
 }
 
@@ -87,6 +92,9 @@ func newModel(deps Deps, logCh <-chan string) model {
 		aliases: deps.Aliases,
 		scenes:  deps.Scenes,
 		state:   state,
+		selected: func() map[string]bool {
+			return make(map[string]bool)
+		}(),
 		logChan: logCh,
 		colorCols: func() int {
 			return computeColorCols(96)
@@ -113,12 +121,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.colorCols = computeColorCols(msg.Width)
 		m.realignSubmenuSelections()
+		m.realignSelector()
 		return m, nil
 	case tea.MouseMsg:
 		if msg.Action != tea.MouseActionPress {
 			return m, nil
 		}
 		if msg.Y == 1 && m.clickedQuit(msg.X) {
+			if m.selecting {
+				m.exitSelector()
+				return m, nil
+			}
 			if m.inSubmenu {
 				m.exitSubmenu()
 				return m, nil
@@ -129,12 +142,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
+			if m.selecting {
+				m.exitSelector()
+				return m, nil
+			}
 			if m.inSubmenu {
 				m.exitSubmenu()
 				return m, nil
 			}
 			return m, tea.Quit
 		case tea.KeyBackspace, tea.KeyCtrlH:
+			if m.selecting {
+				m.exitSelector()
+				return m, nil
+			}
 			if m.inSubmenu {
 				m.exitSubmenu()
 				return m, nil
@@ -143,6 +164,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyRunes:
 			switch strings.ToLower(msg.String()) {
 			case "q", "й":
+				if m.selecting {
+					m.exitSelector()
+					return m, nil
+				}
 				if m.inSubmenu {
 					m.exitSubmenu()
 					return m, nil
@@ -150,6 +175,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		case tea.KeyTab:
+			if m.selecting {
+				return m, nil
+			}
 			if m.inSubmenu {
 				m.subFocus = (m.subFocus + 1) % 3
 				return m, nil
@@ -157,6 +185,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleListFocus()
 			return m, nil
 		case tea.KeyShiftTab:
+			if m.selecting {
+				return m, nil
+			}
 			if m.inSubmenu {
 				m.subFocus = (m.subFocus + 3 - 1) % 3
 				return m, nil
@@ -164,6 +195,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleListFocus()
 			return m, nil
 		case tea.KeyUp:
+			if m.selecting {
+				m.moveSelector(-1)
+				return m, nil
+			}
 			if m.inSubmenu {
 				m.moveSubmenuSelection(-1, 0)
 				return m, nil
@@ -171,6 +206,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveListSelection(-1)
 			return m, nil
 		case tea.KeyDown:
+			if m.selecting {
+				m.moveSelector(1)
+				return m, nil
+			}
 			if m.inSubmenu {
 				m.moveSubmenuSelection(1, 0)
 				return m, nil
@@ -178,6 +217,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveListSelection(1)
 			return m, nil
 		case tea.KeyLeft:
+			if m.selecting {
+				return m, nil
+			}
 			if m.inSubmenu {
 				m.moveSubmenuSelection(0, -1)
 				return m, nil
@@ -196,6 +238,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case tea.KeyRight:
+			if m.selecting {
+				return m, nil
+			}
 			if m.inSubmenu {
 				m.moveSubmenuSelection(0, 1)
 				return m, nil
@@ -214,14 +259,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case tea.KeyEnter, tea.KeySpace:
+			if m.selecting {
+				m.toggleSelector()
+				return m, nil
+			}
 			if m.inSubmenu {
 				return m, m.applySubmenuSelection()
 			}
-			if m.listFocus == focusScenes && len(m.scenes) > 0 {
-				scene := m.scenes[m.sceneIndex]
-				m.status = fmt.Sprintf("Running scene %s...", scene)
-				m.submitting = true
-				return m, m.runScene(scene)
+			if m.listFocus == focusScenes {
+				if m.sceneIndex == len(m.scenes) {
+					m.enterSelector()
+					return m, nil
+				}
+				if len(m.scenes) > 0 {
+					scene := m.scenes[m.sceneIndex]
+					m.status = fmt.Sprintf("Running scene %s...", scene)
+					m.submitting = true
+					return m, m.runScene(scene)
+				}
 			}
 			if m.listFocus == focusAliases && len(m.aliases) > 0 && m.actionFocus {
 				alias := m.aliases[m.aliasIndex]
@@ -271,6 +326,7 @@ func (m *model) toggleListFocus() {
 	}
 	m.actionFocus = false
 	m.inSubmenu = false
+	m.selecting = false
 }
 
 // moveListSelection moves selection in the active list.
@@ -284,11 +340,17 @@ func (m *model) moveListSelection(delta int) {
 		m.actionFocus = false
 		m.inSubmenu = false
 	case focusScenes:
-		if len(m.scenes) == 0 {
+		count := m.sceneItemCount()
+		if count == 0 {
 			return
 		}
-		m.sceneIndex = (m.sceneIndex + delta + len(m.scenes)) % len(m.scenes)
+		m.sceneIndex = (m.sceneIndex + delta + count) % count
 	}
+}
+
+// sceneItemCount returns number of rows in the scenes list (scenes + add button).
+func (m model) sceneItemCount() int {
+	return len(m.scenes) + 1
 }
 
 // runCommand is a placeholder since TUI uses direct alias operations.
@@ -296,6 +358,39 @@ func (m model) runCommand() tea.Cmd {
 	return func() tea.Msg {
 		return commandResultMsg{err: errors.New("no command inputs available in TUI")}
 	}
+}
+
+// enterSelector opens alias selection view.
+func (m *model) enterSelector() {
+	m.selecting = true
+	m.selectIndex = 0
+}
+
+// exitSelector closes alias selection view.
+func (m *model) exitSelector() {
+	m.selecting = false
+}
+
+// moveSelector moves selection in alias selector.
+func (m *model) moveSelector(delta int) {
+	if len(m.aliases) == 0 {
+		return
+	}
+	m.selectIndex = (m.selectIndex + delta + len(m.aliases)) % len(m.aliases)
+}
+
+// toggleSelector toggles current alias selection.
+func (m *model) toggleSelector() {
+	if len(m.aliases) == 0 {
+		return
+	}
+	alias := m.aliases[m.selectIndex]
+	m.selected[alias] = !m.selected[alias]
+}
+
+// realignSelector clamps selector index on data change/resize.
+func (m *model) realignSelector() {
+	m.selectIndex = clampIndex(m.selectIndex, len(m.aliases))
 }
 
 // enterSubmenu opens the color/temp/brightness submenu for the alias.
@@ -382,6 +477,9 @@ func (m model) applySubmenuSelection() tea.Cmd {
 // clickedQuit detects clicks on the "quit" word in the help line.
 func (m model) clickedQuit(x int) bool {
 	help := mainHelpText
+	if m.selecting {
+		help = selectHelpText
+	}
 	if m.inSubmenu {
 		help = subHelpText
 	}
@@ -396,6 +494,9 @@ func (m model) clickedQuit(x int) bool {
 
 // handleMouse dispatches mouse clicks to the appropriate handler.
 func (m *model) handleMouse(msg tea.MouseMsg) tea.Cmd {
+	if m.selecting {
+		return m.handleMouseSelector(msg)
+	}
 	if m.inSubmenu {
 		return m.handleMouseSubmenu(msg)
 	}
@@ -464,17 +565,41 @@ func (m *model) handleMouseMain(msg tea.MouseMsg) tea.Cmd {
 			return nil
 		}
 		idx := line - 1
-		if idx < 0 || idx >= len(m.scenes) {
+		total := m.sceneItemCount()
+		if idx < 0 || idx >= total {
 			return nil
 		}
 		m.listFocus = focusScenes
 		m.sceneIndex = idx
+		if idx == len(m.scenes) {
+			m.enterSelector()
+			return nil
+		}
 		scene := m.scenes[m.sceneIndex]
 		m.status = fmt.Sprintf("Running scene %s...", scene)
 		m.submitting = true
 		return m.runScene(scene)
 	}
 
+	return nil
+}
+
+// handleMouseSelector reacts to clicks inside alias selector view.
+func (m *model) handleMouseSelector(msg tea.MouseMsg) tea.Cmd {
+	top := 2 // header + help
+	if msg.Y < top {
+		return nil
+	}
+	line := msg.Y - top
+	if line == 0 {
+		return nil
+	}
+	idx := line - 1
+	if idx < 0 || idx >= len(m.aliases) {
+		return nil
+	}
+	m.selectIndex = idx
+	m.toggleSelector()
 	return nil
 }
 

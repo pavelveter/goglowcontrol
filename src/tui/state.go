@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -194,6 +195,33 @@ func splitSceneCommand(raw string) (alias, action, param string) {
 		param = parts[2]
 	}
 	return alias, action, param
+}
+
+// Summary returns a human-readable state for an alias.
+func (s *State) Summary(alias string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.lights[alias]
+	if !ok {
+		return "", false
+	}
+	var parts []string
+	if state.Power != "" {
+		parts = append(parts, state.Power)
+	}
+	if state.Color != "" {
+		parts = append(parts, "color:"+state.Color)
+	}
+	if state.Brightness != 0 {
+		parts = append(parts, fmt.Sprintf("b:%d", state.Brightness))
+	}
+	if state.Temperature != 0 {
+		parts = append(parts, fmt.Sprintf("t:%d", state.Temperature))
+	}
+	if len(parts) == 0 {
+		return "", false
+	}
+	return strings.Join(parts, " "), true
 }
 
 func parseInt(val string) (int, bool) {
