@@ -23,6 +23,8 @@ func runTUI() error {
 		MaxTemperature: maxTemperature,
 		ResolveTargets: resolveTargets,
 		Execute:        executeCommand,
+		SceneCommands:  collectSceneCommandsMap(),
+		State:          tui.NewState(minBrightness, maxBrightness, minTemperature, maxTemperature),
 		RunScene: func(name string) (string, error) {
 			executeScene(name)
 			return fmt.Sprintf("Scene %s executed", name), nil
@@ -81,6 +83,17 @@ func collectSceneNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// collectSceneCommandsMap copies scene commands for TUI state tracking.
+func collectSceneCommandsMap() map[string][]string {
+	result := make(map[string][]string, len(scenes))
+	for name, scene := range scenes {
+		cmds := make([]string, len(scene.Commands))
+		copy(cmds, scene.Commands)
+		result[name] = cmds
+	}
+	return result
 }
 
 // resolveTargets expands aliases and ranges into concrete IPs.

@@ -16,6 +16,8 @@ type Deps struct {
 	ResolveTargets func([]string) ([]string, error)
 	Execute        func(ip, command, param string)
 	RunScene       func(string) (string, error)
+	SceneCommands  map[string][]string
+	State          *State
 }
 
 // defaults fills unset numeric fields with sensible defaults.

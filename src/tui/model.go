@@ -67,12 +67,18 @@ type model struct {
 	colorIndex    int
 	tempIndex     int
 	brightIndex   int
+	state         *State
 	logChan       <-chan string
 }
 
 // newModel builds the Bubble Tea model with initial data and listeners.
 func newModel(deps Deps, logCh <-chan string) model {
 	deps.defaults()
+	state := deps.State
+	if state == nil {
+		state = NewState(deps.MinBrightness, deps.MaxBrightness, deps.MinTemperature, deps.MaxTemperature)
+		deps.State = state
+	}
 
 	m := model{
 		deps:    deps,
@@ -80,6 +86,7 @@ func newModel(deps Deps, logCh <-chan string) model {
 		colors:  deps.Colors,
 		aliases: deps.Aliases,
 		scenes:  deps.Scenes,
+		state:   state,
 		logChan: logCh,
 		colorCols: func() int {
 			return computeColorCols(96)
@@ -546,6 +553,9 @@ func (m model) runAliasAction(alias, action string) tea.Cmd {
 		if len(ips) == 0 {
 			return commandResultMsg{err: fmt.Errorf("alias %s has no IPs", alias)}
 		}
+		if m.state != nil {
+			m.state.RecordAction(alias, action)
+		}
 		var wg sync.WaitGroup
 		for _, ip := range ips {
 			wg.Add(1)
@@ -574,6 +584,9 @@ func (m model) runAliasCommand(alias, command, param string) tea.Cmd {
 		if len(ips) == 0 {
 			return commandResultMsg{err: fmt.Errorf("alias %s has no IPs", alias)}
 		}
+		if m.state != nil {
+			m.state.RecordCommand(alias, command, param)
+		}
 		var wg sync.WaitGroup
 		for _, ip := range ips {
 			wg.Add(1)
@@ -594,6 +607,9 @@ func (m model) runScene(sceneName string) tea.Cmd {
 	return func() tea.Msg {
 		if m.deps.RunScene == nil {
 			return commandResultMsg{err: errors.New("no scene handler")}
+		}
+		if m.state != nil && m.deps.SceneCommands != nil {
+			m.state.RecordScene(m.deps.SceneCommands[sceneName])
 		}
 		msg, err := m.deps.RunScene(sceneName)
 		if msg == "" {
