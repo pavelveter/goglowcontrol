@@ -33,12 +33,15 @@ func computeUsableWidth(totalWidth int) int {
 
 // computeSubmenuWidths splits available width between three panels.
 func computeSubmenuWidths(usableWidth int) (int, int, int) {
-	third := usableWidth / 3
-	colWidth := third
-	tempWidth := third
-	brightWidth := usableWidth - colWidth - tempWidth
+	colWidth := usableWidth * 2 / 3
+	rest := usableWidth - colWidth
+	tempWidth := rest / 2
+	brightWidth := rest - tempWidth
 	if brightWidth < 10 {
 		brightWidth = 10
+	}
+	if tempWidth < 10 {
+		tempWidth = 10
 	}
 	return colWidth, tempWidth, brightWidth
 }
