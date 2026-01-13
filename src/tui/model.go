@@ -931,8 +931,12 @@ func (m model) runAliasAction(alias, action string) tea.Cmd {
 			}(ip)
 		}
 		wg.Wait()
+		label := "targets"
+		if len(ips) == 1 {
+			label = "target"
+		}
 		return commandResultMsg{
-			message: fmt.Sprintf("Sent %s to %s (%d target(s))", action, alias, len(ips)),
+			message: fmt.Sprintf("Sent %s to %s (%d %s)", action, alias, len(ips), label),
 		}
 	}
 }
@@ -962,8 +966,12 @@ func (m model) runAliasCommand(alias, command, param string) tea.Cmd {
 			}(ip)
 		}
 		wg.Wait()
+		label := "targets"
+		if len(ips) == 1 {
+			label = "target"
+		}
 		return commandResultMsg{
-			message: fmt.Sprintf("Sent %s %s to %s (%d target(s))", command, param, alias, len(ips)),
+			message: fmt.Sprintf("Sent %s %s to %s (%d %s)", command, param, alias, len(ips), label),
 		}
 	}
 }
