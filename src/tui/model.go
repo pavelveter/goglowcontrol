@@ -7,6 +7,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -31,6 +32,22 @@ type commandResultMsg struct {
 	err     error
 }
 
+type sceneSavedMsg struct {
+	name string
+	err  error
+	// updated is true when an existing line was replaced.
+	updated  bool
+	commands []string
+}
+
+type addFocusArea int
+
+const (
+	addFocusName addFocusArea = iota
+	addFocusAliases
+	addFocusButtons
+)
+
 var (
 	titleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 	sectionStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81"))
@@ -40,11 +57,10 @@ var (
 	helpStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
 	selectedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Bold(true)
 	focusedTitle   = sectionStyle.Copy().Underline(true)
-	checkStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
 	aliasActions   = []string{"on", "off"}
 	mainHelpText   = "Tab switch lists • Up/Down move • Left/Right choose alias on/off • Enter/Space run selection • Ctrl+C/Esc/q quit"
 	subHelpText    = "Tab switch panels • Arrows move • Enter/Space apply • Backspace return • Ctrl+C/Esc/q quit"
-	selectHelpText = "Up/Down move • Enter/Space toggle ✓ • Backspace return • Ctrl+C/Esc/q quit"
+	addSceneHelp   = "Tab Name/Aliases/Buttons • Enter/Space toggle/select • Esc/Ctrl+C/q quit"
 )
 
 // model holds UI state.
@@ -70,9 +86,12 @@ type model struct {
 	tempIndex     int
 	brightIndex   int
 	state         *State
-	selecting     bool
-	selectIndex   int
-	selected      map[string]bool
+	addingScene   bool
+	addMenuIndex  int
+	addFocus      addFocusArea
+	addAliasIndex int
+	addSelected   map[string]bool
+	sceneName     textinput.Model
 	logChan       <-chan string
 }
 
@@ -85,6 +104,13 @@ func newModel(deps Deps, logCh <-chan string) model {
 		deps.State = state
 	}
 
+	nameInput := textinput.New()
+	nameInput.Placeholder = "Scene name"
+	nameInput.CharLimit = 64
+	nameInput.Prompt = "Name: "
+	nameInput.Width = 40
+	nameInput.Blur()
+
 	m := model{
 		deps:    deps,
 		status:  "Use alias/scenes blocks or enter targets for future commands",
@@ -92,10 +118,13 @@ func newModel(deps Deps, logCh <-chan string) model {
 		aliases: deps.Aliases,
 		scenes:  deps.Scenes,
 		state:   state,
-		selected: func() map[string]bool {
+		logChan: logCh,
+		sceneName: func() textinput.Model {
+			return nameInput
+		}(),
+		addSelected: func() map[string]bool {
 			return make(map[string]bool)
 		}(),
-		logChan: logCh,
 		colorCols: func() int {
 			return computeColorCols(96)
 		}(),
@@ -121,15 +150,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.colorCols = computeColorCols(msg.Width)
 		m.realignSubmenuSelections()
-		m.realignSelector()
+		m.realignAddMenu()
 		return m, nil
 	case tea.MouseMsg:
 		if msg.Action != tea.MouseActionPress {
 			return m, nil
 		}
 		if msg.Y == 1 && m.clickedQuit(msg.X) {
-			if m.selecting {
-				m.exitSelector()
+			if m.addingScene {
+				m.exitAddScene()
 				return m, nil
 			}
 			if m.inSubmenu {
@@ -140,22 +169,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.handleMouse(msg)
 	case tea.KeyMsg:
+		if m.addingScene {
+			return m.handleAddSceneKeys(msg)
+		}
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
-			if m.selecting {
-				m.exitSelector()
-				return m, nil
-			}
 			if m.inSubmenu {
 				m.exitSubmenu()
 				return m, nil
 			}
 			return m, tea.Quit
 		case tea.KeyBackspace, tea.KeyCtrlH:
-			if m.selecting {
-				m.exitSelector()
-				return m, nil
-			}
 			if m.inSubmenu {
 				m.exitSubmenu()
 				return m, nil
@@ -164,10 +188,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyRunes:
 			switch strings.ToLower(msg.String()) {
 			case "q", "й":
-				if m.selecting {
-					m.exitSelector()
-					return m, nil
-				}
 				if m.inSubmenu {
 					m.exitSubmenu()
 					return m, nil
@@ -175,9 +195,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		case tea.KeyTab:
-			if m.selecting {
-				return m, nil
-			}
 			if m.inSubmenu {
 				m.subFocus = (m.subFocus + 1) % 3
 				return m, nil
@@ -185,9 +202,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleListFocus()
 			return m, nil
 		case tea.KeyShiftTab:
-			if m.selecting {
-				return m, nil
-			}
 			if m.inSubmenu {
 				m.subFocus = (m.subFocus + 3 - 1) % 3
 				return m, nil
@@ -195,10 +209,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleListFocus()
 			return m, nil
 		case tea.KeyUp:
-			if m.selecting {
-				m.moveSelector(-1)
-				return m, nil
-			}
 			if m.inSubmenu {
 				m.moveSubmenuSelection(-1, 0)
 				return m, nil
@@ -206,10 +216,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveListSelection(-1)
 			return m, nil
 		case tea.KeyDown:
-			if m.selecting {
-				m.moveSelector(1)
-				return m, nil
-			}
 			if m.inSubmenu {
 				m.moveSubmenuSelection(1, 0)
 				return m, nil
@@ -217,9 +223,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveListSelection(1)
 			return m, nil
 		case tea.KeyLeft:
-			if m.selecting {
-				return m, nil
-			}
 			if m.inSubmenu {
 				m.moveSubmenuSelection(0, -1)
 				return m, nil
@@ -238,9 +241,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case tea.KeyRight:
-			if m.selecting {
-				return m, nil
-			}
 			if m.inSubmenu {
 				m.moveSubmenuSelection(0, 1)
 				return m, nil
@@ -259,16 +259,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case tea.KeyEnter, tea.KeySpace:
-			if m.selecting {
-				m.toggleSelector()
-				return m, nil
-			}
 			if m.inSubmenu {
 				return m, m.applySubmenuSelection()
 			}
 			if m.listFocus == focusScenes {
 				if m.sceneIndex == len(m.scenes) {
-					m.enterSelector()
+					m.openAddSceneMenu()
 					return m, nil
 				}
 				if len(m.scenes) > 0 {
@@ -312,6 +308,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = statusOkStyle.Render(cleanStatus(msg.message))
 		}
 		return m, m.listenForLog()
+	case sceneSavedMsg:
+		m.submitting = false
+		if msg.err != nil {
+			m.status = statusErrStyle.Render(cleanStatus(fmt.Sprintf("Error: %v", msg.err)))
+			m.setAddFocus(addFocusName)
+			return m, m.listenForLog()
+		}
+		if msg.updated {
+			m.status = statusOkStyle.Render(cleanStatus(fmt.Sprintf("Scene %s updated", msg.name)))
+		} else {
+			m.status = statusOkStyle.Render(cleanStatus(fmt.Sprintf("Scene %s saved", msg.name)))
+		}
+		m.exitAddScene()
+		if idx := m.findSceneIndex(msg.name); idx >= 0 {
+			m.sceneIndex = idx
+		} else {
+			m.scenes = append(m.scenes, msg.name)
+			m.sceneIndex = len(m.scenes) - 1
+		}
+		m.listFocus = focusScenes
+		m.actionFocus = false
+		if m.deps.SceneCommands != nil {
+			m.deps.SceneCommands[msg.name] = msg.commands
+		}
+		return m, m.listenForLog()
 	}
 
 	return m, nil
@@ -326,7 +347,8 @@ func (m *model) toggleListFocus() {
 	}
 	m.actionFocus = false
 	m.inSubmenu = false
-	m.selecting = false
+	m.addingScene = false
+	m.addSelected = make(map[string]bool)
 }
 
 // moveListSelection moves selection in the active list.
@@ -353,6 +375,27 @@ func (m model) sceneItemCount() int {
 	return len(m.scenes) + 1
 }
 
+// sceneExists checks if a scene with the given name is already listed.
+func (m model) sceneExists(name string) bool {
+	name = strings.TrimSpace(name)
+	for _, scene := range m.scenes {
+		if scene == name {
+			return true
+		}
+	}
+	return false
+}
+
+// findSceneIndex returns index of scene by name or -1.
+func (m model) findSceneIndex(name string) int {
+	for i, scene := range m.scenes {
+		if scene == name {
+			return i
+		}
+	}
+	return -1
+}
+
 // runCommand is a placeholder since TUI uses direct alias operations.
 func (m model) runCommand() tea.Cmd {
 	return func() tea.Msg {
@@ -360,37 +403,203 @@ func (m model) runCommand() tea.Cmd {
 	}
 }
 
-// enterSelector opens alias selection view.
-func (m *model) enterSelector() {
-	m.selecting = true
-	m.selectIndex = 0
+// openAddSceneMenu opens the add scene menu.
+func (m *model) openAddSceneMenu() {
+	m.addingScene = true
+	m.addMenuIndex = 0
+	m.addFocus = addFocusName
+	m.addAliasIndex = 0
+	m.addSelected = make(map[string]bool)
+	m.sceneName.SetValue("")
+	m.sceneName.CursorEnd()
+	m.sceneName.Focus()
 }
 
-// exitSelector closes alias selection view.
-func (m *model) exitSelector() {
-	m.selecting = false
+// exitAddScene closes the add scene flow.
+func (m *model) exitAddScene() {
+	m.addingScene = false
+	m.addMenuIndex = 0
+	m.sceneName.SetValue("")
+	m.sceneName.Blur()
+	m.addSelected = make(map[string]bool)
+	m.addFocus = addFocusName
+	m.addAliasIndex = 0
 }
 
-// moveSelector moves selection in alias selector.
-func (m *model) moveSelector(delta int) {
-	if len(m.aliases) == 0 {
+// realignAddMenu clamps menu selection on resize.
+func (m *model) realignAddMenu() {
+	m.addMenuIndex = clampIndex(m.addMenuIndex, 2)
+	m.addAliasIndex = clampIndex(m.addAliasIndex, len(m.aliases))
+}
+
+// setAddFocus switches focus for add-scene mode and keeps the text input synced.
+func (m *model) setAddFocus(target addFocusArea) {
+	m.addFocus = target
+	if target == addFocusName {
+		m.sceneName.Focus()
+	} else {
+		m.sceneName.Blur()
+	}
+}
+
+// cycleAddFocus rotates focus between name, aliases, and buttons.
+func (m *model) cycleAddFocus(delta int) {
+	current := int(m.addFocus)
+	for i := 0; i < 3; i++ {
+		next := (current + delta + 3) % 3
+		if next == int(addFocusAliases) && len(m.aliases) == 0 {
+			current = next
+			continue
+		}
+		m.setAddFocus(addFocusArea(next))
 		return
 	}
-	m.selectIndex = (m.selectIndex + delta + len(m.aliases)) % len(m.aliases)
 }
 
-// toggleSelector toggles current alias selection.
-func (m *model) toggleSelector() {
-	if len(m.aliases) == 0 {
+// toggleAliasSelection flips selection state for the alias at index.
+func (m *model) toggleAliasSelection(idx int) {
+	if idx < 0 || idx >= len(m.aliases) {
 		return
 	}
-	alias := m.aliases[m.selectIndex]
-	m.selected[alias] = !m.selected[alias]
+	alias := m.aliases[idx]
+	m.addSelected[alias] = !m.addSelected[alias]
 }
 
-// realignSelector clamps selector index on data change/resize.
-func (m *model) realignSelector() {
-	m.selectIndex = clampIndex(m.selectIndex, len(m.aliases))
+// buildSceneCommands constructs commands for selected aliases (default "on").
+func (m model) buildSceneCommands() []string {
+	var cmds []string
+	for _, alias := range m.aliases {
+		if m.addSelected[alias] {
+			if cmd, ok := m.buildSceneCommand(alias); ok {
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
+	return cmds
+}
+
+// buildSceneCommand creates a single scene command using current state, falling back to on.
+func (m model) buildSceneCommand(alias string) (string, bool) {
+	if m.state == nil {
+		return fmt.Sprintf("%s on", alias), true
+	}
+	snap := m.state.Snapshot()
+	state, ok := snap[alias]
+	if !ok {
+		return fmt.Sprintf("%s on", alias), true
+	}
+	// Prefer explicit off.
+	if strings.ToLower(state.Power) == "off" {
+		return fmt.Sprintf("%s off", alias), true
+	}
+	// Prefer color if set.
+	if state.Color != "" {
+		return fmt.Sprintf("%s %s", alias, state.Color), true
+	}
+	// Then brightness.
+	if state.Brightness != 0 {
+		return fmt.Sprintf("%s brightness %d", alias, state.Brightness), true
+	}
+	// Then temperature.
+	if state.Temperature != 0 {
+		return fmt.Sprintf("%s t %d", alias, state.Temperature), true
+	}
+	// Fallback to power on.
+	if state.Power != "" {
+		return fmt.Sprintf("%s %s", alias, state.Power), true
+	}
+	return fmt.Sprintf("%s on", alias), true
+}
+
+// handleAddSceneKeys manages key handling inside the add scene views.
+func (m model) handleAddSceneKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.submitting {
+		return m, nil
+	}
+
+	switch msg.Type {
+	case tea.KeyCtrlC, tea.KeyEsc:
+		m.exitAddScene()
+		return m, nil
+	case tea.KeyBackspace, tea.KeyCtrlH:
+		if m.addFocus == addFocusName {
+			var cmd tea.Cmd
+			m.sceneName, cmd = m.sceneName.Update(msg)
+			return m, cmd
+		}
+		m.exitAddScene()
+		return m, nil
+	case tea.KeyTab:
+		m.cycleAddFocus(1)
+		return m, nil
+	case tea.KeyShiftTab:
+		m.cycleAddFocus(-1)
+		return m, nil
+	}
+
+	switch m.addFocus {
+	case addFocusName:
+		var cmd tea.Cmd
+		m.sceneName, cmd = m.sceneName.Update(msg)
+		if msg.Type == tea.KeyEnter {
+			m.cycleAddFocus(1)
+			return m, nil
+		}
+		return m, cmd
+	case addFocusAliases:
+		if len(m.aliases) == 0 {
+			return m, nil
+		}
+		switch msg.Type {
+		case tea.KeyUp:
+			m.addAliasIndex = (m.addAliasIndex + len(m.aliases) - 1) % len(m.aliases)
+			return m, nil
+		case tea.KeyDown:
+			m.addAliasIndex = (m.addAliasIndex + 1) % len(m.aliases)
+			return m, nil
+		case tea.KeyEnter, tea.KeySpace:
+			m.toggleAliasSelection(m.addAliasIndex)
+			return m, nil
+		}
+	case addFocusButtons:
+		switch msg.Type {
+		case tea.KeyLeft, tea.KeyRight:
+			m.addMenuIndex = (m.addMenuIndex + 1) % 2
+			return m, nil
+		case tea.KeyEnter, tea.KeySpace:
+			return m, m.applyAddMenuSelection()
+		}
+	}
+	return m, nil
+}
+
+// applyAddMenuSelection runs the highlighted menu action.
+func (m *model) applyAddMenuSelection() tea.Cmd {
+	switch m.addMenuIndex {
+	case 0: // Add
+		name := strings.TrimSpace(m.sceneName.Value())
+		if name == "" {
+			m.status = statusErrStyle.Render("Scene name cannot be empty")
+			m.setAddFocus(addFocusName)
+			return nil
+		}
+		cmds := m.buildSceneCommands()
+		if len(cmds) == 0 {
+			m.status = statusErrStyle.Render("Select at least one alias")
+			m.setAddFocus(addFocusAliases)
+			return nil
+		}
+		if m.sceneExists(name) {
+			m.status = fmt.Sprintf("Updating scene %s...", name)
+		} else {
+			m.status = fmt.Sprintf("Saving scene %s...", name)
+		}
+		m.submitting = true
+		return m.saveScene(name, cmds)
+	default: // Cancel
+		m.exitAddScene()
+		return nil
+	}
 }
 
 // enterSubmenu opens the color/temp/brightness submenu for the alias.
@@ -477,8 +686,8 @@ func (m model) applySubmenuSelection() tea.Cmd {
 // clickedQuit detects clicks on the "quit" word in the help line.
 func (m model) clickedQuit(x int) bool {
 	help := mainHelpText
-	if m.selecting {
-		help = selectHelpText
+	if m.addingScene {
+		help = addSceneHelp
 	}
 	if m.inSubmenu {
 		help = subHelpText
@@ -494,8 +703,8 @@ func (m model) clickedQuit(x int) bool {
 
 // handleMouse dispatches mouse clicks to the appropriate handler.
 func (m *model) handleMouse(msg tea.MouseMsg) tea.Cmd {
-	if m.selecting {
-		return m.handleMouseSelector(msg)
+	if m.addingScene {
+		return m.handleMouseAddScene(msg)
 	}
 	if m.inSubmenu {
 		return m.handleMouseSubmenu(msg)
@@ -572,7 +781,7 @@ func (m *model) handleMouseMain(msg tea.MouseMsg) tea.Cmd {
 		m.listFocus = focusScenes
 		m.sceneIndex = idx
 		if idx == len(m.scenes) {
-			m.enterSelector()
+			m.openAddSceneMenu()
 			return nil
 		}
 		scene := m.scenes[m.sceneIndex]
@@ -584,22 +793,54 @@ func (m *model) handleMouseMain(msg tea.MouseMsg) tea.Cmd {
 	return nil
 }
 
-// handleMouseSelector reacts to clicks inside alias selector view.
-func (m *model) handleMouseSelector(msg tea.MouseMsg) tea.Cmd {
+// handleMouseAddScene reacts to clicks inside add scene views.
+func (m *model) handleMouseAddScene(msg tea.MouseMsg) tea.Cmd {
+	usableWidth := computeUsableWidth(m.width)
 	top := 2 // header + help
 	if msg.Y < top {
 		return nil
 	}
-	line := msg.Y - top
-	if line == 0 {
+
+	nameStart := top
+	aliasStart := nameStart + 2
+	aliasLines := 1
+	if len(m.aliases) > 0 {
+		aliasLines += len(m.aliases)
+	} else {
+		aliasLines++
+	}
+	buttonStart := aliasStart + aliasLines
+	buttonLine := buttonStart + 1
+
+	if msg.Y == nameStart+1 {
+		m.setAddFocus(addFocusName)
+		m.sceneName.Focus()
 		return nil
 	}
-	idx := line - 1
-	if idx < 0 || idx >= len(m.aliases) {
-		return nil
+
+	if msg.Y > aliasStart && msg.Y <= aliasStart+aliasLines-1 {
+		if len(m.aliases) == 0 {
+			return nil
+		}
+		idx := msg.Y - aliasStart - 1
+		if idx >= 0 && idx < len(m.aliases) {
+			m.setAddFocus(addFocusAliases)
+			m.addAliasIndex = idx
+			m.toggleAliasSelection(idx)
+			return nil
+		}
 	}
-	m.selectIndex = idx
-	m.toggleSelector()
+
+	if msg.Y == buttonLine {
+		m.setAddFocus(addFocusButtons)
+		if msg.X < usableWidth/2 {
+			m.addMenuIndex = 0
+		} else {
+			m.addMenuIndex = 1
+		}
+		return m.applyAddMenuSelection()
+	}
+
 	return nil
 }
 
@@ -741,6 +982,18 @@ func (m model) runScene(sceneName string) tea.Cmd {
 			msg = fmt.Sprintf("Scene %s executed", sceneName)
 		}
 		return commandResultMsg{message: msg, err: err}
+	}
+}
+
+// saveScene delegates scene persistence.
+func (m model) saveScene(name string, commands []string) tea.Cmd {
+	clean := strings.TrimSpace(name)
+	return func() tea.Msg {
+		if m.deps.SaveScene == nil {
+			return sceneSavedMsg{name: clean, commands: commands, err: errors.New("no scene saver")}
+		}
+		updated, err := m.deps.SaveScene(clean, commands)
+		return sceneSavedMsg{name: clean, commands: commands, err: err, updated: updated}
 	}
 }
 

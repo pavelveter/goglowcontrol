@@ -18,6 +18,7 @@ type Deps struct {
 	RunScene       func(string) (string, error)
 	SceneCommands  map[string][]string
 	State          *State
+	SaveScene      func(string, []string) (bool, error)
 }
 
 // defaults fills unset numeric fields with sensible defaults.

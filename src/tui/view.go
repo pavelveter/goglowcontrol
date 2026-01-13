@@ -19,15 +19,15 @@ func (m model) View() string {
 	}
 	usableWidth := computeUsableWidth(totalWidth)
 
-	if m.selecting {
-		header = titleStyle.Render("Select aliases")
-		help = helpStyle.Render(selectHelpText)
-		selector := m.renderSelectorBox(usableWidth)
+	if m.addingScene {
+		header = titleStyle.Render("New scene")
+		help = helpStyle.Render(addSceneHelp)
+		layout := m.renderAddSceneLayout(usableWidth)
 		statusBox := boxStyle.Width(usableWidth).Render(sectionStyle.Render("Status") + "\n" + m.status)
 		return lipgloss.JoinVertical(lipgloss.Left,
 			header,
 			help,
-			selector,
+			layout,
 			statusBox,
 		)
 	}
@@ -123,41 +123,67 @@ func (m model) renderSceneBodyWithAdd(active bool) string {
 	return strings.Join(rows, "\n")
 }
 
-// renderSelectorBody renders alias list with check marks and state info.
-func (m model) renderSelectorBody(active bool) string {
+// renderAddSceneLayout shows name input, alias selection, and buttons.
+func (m model) renderAddSceneLayout(width int) string {
+	nameBox := m.renderAddSceneNameBox(width)
+	aliasBox := m.renderAddSceneAliasBox(width)
+	buttons := m.renderAddSceneButtons(width)
+	return lipgloss.JoinVertical(lipgloss.Left, nameBox, aliasBox, buttons)
+}
+
+func (m model) renderAddSceneNameBox(width int) string {
+	title := sectionStyle.Render("Scene Name")
+	if m.addFocus == addFocusName {
+		title = focusedTitle.Render("Scene Name")
+	}
+	return boxStyle.Width(width).Render(title + "\n" + m.sceneName.View())
+}
+
+func (m model) renderAddSceneAliasBox(width int) string {
+	title := sectionStyle.Render("Aliases in Scene")
+	if m.addFocus == addFocusAliases {
+		title = focusedTitle.Render("Aliases in Scene")
+	}
 	if len(m.aliases) == 0 {
-		return "–"
+		return boxStyle.Width(width).Render(title + "\n–")
 	}
 	var rows []string
 	for i, alias := range m.aliases {
-		check := " "
-		if m.selected[alias] {
-			check = checkStyle.Render("✓")
+		check := "[ ]"
+		if m.addSelected[alias] {
+			check = "[x]"
 		}
-		stateText := ""
+		line := fmt.Sprintf("%s %s", check, alias)
 		if m.state != nil {
 			if summary, ok := m.state.Summary(alias); ok {
-				stateText = summary
+				line = fmt.Sprintf("%s  %s", line, summary)
 			}
 		}
-		content := alias
-		if stateText != "" {
-			content = fmt.Sprintf("%s  %s", alias, stateText)
-		}
-		if active && i == m.selectIndex {
-			rows = append(rows, "> "+check+" "+selectedStyle.Render(content))
+		if m.addFocus == addFocusAliases && i == m.addAliasIndex {
+			rows = append(rows, "> "+selectedStyle.Render(line))
 		} else {
-			rows = append(rows, "  "+check+" "+content)
+			rows = append(rows, "  "+line)
 		}
 	}
-	return strings.Join(rows, "\n")
+	return boxStyle.Width(width).Render(title + "\n" + strings.Join(rows, "\n"))
 }
 
-// renderSelectorBox renders alias selector view with states.
-func (m model) renderSelectorBox(width int) string {
-	title := focusedTitle.Render("Aliases")
-	body := m.renderSelectorBody(true)
-	return boxStyle.Width(width).Render(title + "\n" + body)
+func (m model) renderAddSceneButtons(width int) string {
+	title := sectionStyle.Render("Actions")
+	if m.addFocus == addFocusButtons {
+		title = focusedTitle.Render("Actions")
+	}
+	options := []string{"Add", "Cancel"}
+	var rows []string
+	for i, opt := range options {
+		label := fmt.Sprintf("[ %s ]", opt)
+		if m.addFocus == addFocusButtons && i == m.addMenuIndex {
+			rows = append(rows, "> "+selectedStyle.Render(label))
+		} else {
+			rows = append(rows, "  "+label)
+		}
+	}
+	return boxStyle.Width(width).Render(title + "\n" + strings.Join(rows, "\n"))
 }
 
 // renderColorsPanel draws the colors panel in submenu.

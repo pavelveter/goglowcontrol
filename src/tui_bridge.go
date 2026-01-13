@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -10,6 +12,7 @@ import (
 
 // runTUI constructs dependencies and launches the TUI.
 func runTUI() error {
+	scenesPath := filepath.Join("cfg", "scenes.txt")
 	deps := tui.Deps{
 		Colors:         collectColorNames(),
 		Aliases:        collectAliases(),
@@ -25,12 +28,74 @@ func runTUI() error {
 		Execute:        executeCommand,
 		SceneCommands:  collectSceneCommandsMap(),
 		State:          tui.NewState(minBrightness, maxBrightness, minTemperature, maxTemperature),
+		SaveScene: func(name string, commands []string) (bool, error) {
+			return saveSceneToFile(scenesPath, name, commands)
+		},
 		RunScene: func(name string) (string, error) {
 			executeScene(name)
 			return fmt.Sprintf("Scene %s executed", name), nil
 		},
 	}
 	return tui.Run(deps)
+}
+
+func saveSceneToFile(path, name string, commands []string) (bool, error) {
+	if name == "" {
+		return false, fmt.Errorf("scene name cannot be empty")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, fmt.Errorf("creating cfg directory: %w", err)
+	}
+
+	entry := fmt.Sprintf("%s:", name)
+	if len(commands) > 0 {
+		entry = fmt.Sprintf("%s: %s", name, strings.Join(commands, ", "))
+	}
+	updated := false
+
+	var lines []string
+	if data, err := os.ReadFile(path); err == nil {
+		lines = strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("reading scenes file: %w", err)
+	}
+
+	out := make([]string, 0, len(lines)+1)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" && line == "" {
+			continue
+		}
+		parts := strings.SplitN(trimmed, ":", 2)
+		if len(parts) > 0 && strings.TrimSpace(parts[0]) == name {
+			if !updated {
+				out = append(out, entry)
+				updated = true
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+
+	if !updated {
+		out = append(out, entry)
+	}
+
+	content := strings.Join(out, "\n")
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return updated, fmt.Errorf("writing scenes file: %w", err)
+	}
+
+	if scenes == nil {
+		scenes = make(map[string]Scene)
+	}
+	scenes[name] = Scene{Name: name, Commands: commands}
+	return updated, nil
 }
 
 // collectColorNames builds a sorted list of available colors.

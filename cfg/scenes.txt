@@ -2,4 +2,6 @@ evening: @tv red, @stand 4300
 lr: @tv_left red, @tv_right fuchsia, @stand 4300
 work: @stand blue, @tv_left blue, @tv_right green
 movie: @tv red, @stand blue, @kitchen off
-red: @room red
+red: @tv red, @ceil off, @stand red
+blue: @tv blue, @ceil off, @stand blue
+pink: @ceil off, @stand cerise, @tv_left rose, @tv_right magenta
